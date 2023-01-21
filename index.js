@@ -433,7 +433,7 @@ function processNode(input) {
       //     }
       //   }
       // }
-      traverseDeclaration(input)
+      traverseDeclarationReference(input)
       break
     case 'IntegerLiteral':
       // {
@@ -594,22 +594,34 @@ function processNode(input) {
     case 'CompoundAssignOperator':
       break
     case 'CXXFunctionalCastExpr':
+      traverseFunctionalCastExpr(input)
       break
     case 'OpaqueValueExpr':
       break
     case 'ForStmt':
       break
     case 'CXXBoolLiteralExpr':
+      traverseBoolLiteralExpr(input)
       break
     case 'FloatingLiteral':
       break
     case 'NullStmt':
       break
     default:
-      console.log(JSON.stringify(node, null, 2))
-      throw new Error('Unhandled node type ' + node.kind)
+      console.log(JSON.stringify(input.node, null, 2))
+      throw new Error('Unhandled input.node type ' + node.kind)
   }
   return text
+}
+
+function traverseFunctionalCastExpr(input) {
+  input.node.inner?.forEach(node => {
+    processNode({ ...input, node })
+  })
+}
+
+function traverseBoolLiteralExpr(input) {
+  input.body.push(input.value)
 }
 
 function traverseTypedefDecl(input) {
@@ -628,23 +640,71 @@ function traverseTypedef(input) {
 }
 
 function traverseFunctionDecl(input) {
-  const header = [`function ${input.node.name}() {`]
-  input.body.push(header.join(''))
-  input.node.inner?.forEach(node => processNode({ ...input, node }))
+  const params = []
+  const body = []
+  input.node.inner?.forEach(node => {
+    switch (node.kind) {
+      case 'ParmVarDecl':
+        // logJSON(node)
+        traverseFunctionParam({ ...input, node, body: params })
+        break
+      default:
+        processNode({ ...input, node, body })
+        break
+    }
+  })
+  console.log(params)
+  input.body.push(`function ${input.node.name}(${params.join(', ')}) {`)
+  body.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
   input.body.push('}')
 }
 
 function traverseFunctionParam(input) {
   const header = []
-  header.push(
-    `${input.node.name}: ${getType(input.node.type.qualType)}`,
-  )
+  const typeInfo = getTypeInfo(input.node.type.qualType)
+  const comments = []
+  if (typeInfo.unsigned) {
+    comments.push('unsigned')
+  }
+  if (typeInfo.isConst) {
+    comments.push('constant')
+  }
+  if (typeInfo.isRef) {
+    comments.push('reference')
+  }
+  if (typeInfo.isValue) {
+    comments.push('value')
+  }
+  if (comments.length) {
+    header.push(`/* ${comments.join(', ')} */ `)
+  }
+  header.push(`${input.node.name}: ${typeInfo.name}`)
   input.body.push(header.join(''))
 }
 
 function traverseIfStmt(input) {
   const condition = []
-  input.node.inner.forEach(node => processNode({ ...input, node }))
+  const body = []
+  input.node.inner.forEach(node => {
+    switch (node.kind) {
+      case 'CompoundStmt':
+      case 'ReturnStmt':
+      case 'IfStmt':
+        processNode({ ...input, node, body })
+        break
+      default:
+        // console.log(node.kind)
+        processNode({ ...input, node, body: condition })
+        break
+    }
+  })
+  input.body.push(`if (${condition.join('')}) {`)
+  body.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
+  input.body.push('}')
 }
 
 function traverseBinaryOperator(input) {
@@ -658,7 +718,16 @@ function traverseBinaryOperator(input) {
 }
 
 function traverseImplicitCastExpr(input) {
-  input.node.inner.forEach(node => processNode({ ...input, node }))
+  const body = []
+  // input.body.push('(')
+  input.node.inner.forEach(node => {
+    processNode({ ...input, node, body })
+  })
+  body.forEach(line => {
+    input.body.push(`${line}`)
+  })
+  // const typeInfo = getTypeInfo(input.node.type.qualType)
+  // input.body.push(`) as ${typeInfo.name}`)
 }
 
 function traverseUnaryOperator(input) {
@@ -685,13 +754,13 @@ function traverseMemberExpr(input) {
   input.body.push(header.join(''))
 }
 
-function traverseDeclaration(input) {
+function traverseDeclarationReference(input) {
   const typeInfo = getTypeInfo(input.node.type.qualType)
   const header = []
   if (typeInfo.ref) {
     header.push(`/* ref */ `)
   }
-  header.push(`let ${input.node.referencedDecl.name}: ${typeInfo.name}`)
+  header.push(`${input.node.referencedDecl.name}`)
   input.body.push(header.join(''))
 }
 
@@ -710,7 +779,7 @@ function traverseParenExpr(input) {
 function traverseParenExpr(input) {
   input.body.push('(')
   input.node.inner.forEach(node => processNode({ ...input, node }))
-  input.body.push(') as ' + input.node.castKind)
+  input.body.push(')')
 }
 
 function traverseCharacterLiteral(input) {
@@ -718,18 +787,38 @@ function traverseCharacterLiteral(input) {
 }
 
 function traverseReturnStmt(input) {
-  const header = ['return']
-  if (input.node.inner) {
-    header.push(' (')
-  }
-  input.body.push(header.join(''))
-  input.node.inner?.forEach(node => processNode({ ...input, node }))
-  if (input.node.inner) {
-    input.body.push(')')
+  // console.log(JSON.stringify(input.node, null, 2))
+  const cast = []
+  const body = []
+  input.node.inner?.forEach(node => {
+    switch (node.kind) {
+      case 'ImplicitCastExpr':
+        processNode({ ...input, node, body: cast })
+        break
+      case 'CXXFunctionalCastExpr':
+        processNode({ ...input, node, body })
+        break
+      default:
+        processNode({ ...input, node, body })
+        break
+    }
+  })
+
+  if (body.length) {
+    input.body.push('return (')
+    body.forEach(line => {
+      input.body.push(`  ${line}`)
+    })
+    if (cast.length) {
+      input.body.push(`) as ${cast.join('')}`)
+    } else {
+      input.body.push(`)`)
+    }
   }
 }
 
 function traverseCallExpr(input) {
+  // console.log(JSON.stringify(input.node, null, 2))
   input.node.inner.forEach(node => processNode({ ...input, node }))
 }
 
@@ -757,7 +846,7 @@ function getType(name) {
     case 'int':
       return 'number'
     default:
-      return name
+      return name.replace(/:+/g, '_')
   }
 }
 
@@ -768,6 +857,29 @@ function getTypeInfo(string) {
     // uncomment to check
     // throw new Error(parts.join(' '))
   }
-  let isRef = parts[0] === '*'
-  return { name, isRef }
+  let unsigned = false
+  if (parts[0] === 'unsigned') {
+    unsigned = true
+    parts.shift()
+  }
+  let isConst = false
+  if (parts[0] === 'const') {
+    isConst = true
+    parts.shift()
+  }
+  let isValue = false
+  if (parts[0] === '*') {
+    isValue = true
+    parts.shift()
+  }
+  let isRef = false
+  if (parts[0] === '&') {
+    isRef = true
+    parts.shift()
+  }
+  return { name, isRef, isValue, unsigned, isConst }
+}
+
+function logJSON(obj) {
+  console.log(JSON.stringify(obj, null, 2))
 }
