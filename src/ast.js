@@ -34,6 +34,12 @@ function process(input) {
     case ')':
     case ';':
       break
+    case 'expression_statement':
+      body.push(...processExpressionStatement(input))
+      break
+    case 'declaration':
+      body.push(processDeclaration(input))
+      break
     default:
       throwNode(input.node)
   }
@@ -58,7 +64,14 @@ function processInitDeclarator(input) {
         break
       case 'qualified_identifier':
       case 'identifier':
-        info.name = node.text.replace(/[\s:]+/g, '_')
+        if (info.name) {
+          info.init = {
+            type: 'reference',
+            name: node.text.replace(/[\s:]+/g, '_'),
+          }
+        } else {
+          info.name = node.text.replace(/[\s:]+/g, '_')
+        }
         break
       case 'initializer_list':
         // TODO
@@ -224,7 +237,7 @@ function processFunctionDefinition(input) {
       case 'function_declarator': {
         const dec = processFunctionDeclarator({ ...input, node })
         info.name = dec.name
-        info.params = dec.params
+        info.parameters = dec.parameters
         if (dec.typeName) {
           info.returnType = dec.typeName
         }
@@ -302,6 +315,7 @@ function processUpdateExpression(input) {
       case '++':
       case '--':
         info.operator = node.type
+        info.isRightSide = Boolean(info.expression)
         break
       default:
         throwNode(node, input.node)
@@ -715,7 +729,7 @@ function processReturnStatement(input) {
         throwNode(node, input.node)
     }
   })
-  return statement
+  return { type: 'return_statement', statement }
 }
 
 function processConditionalExpression(input) {
@@ -858,45 +872,51 @@ function processCallExpression(input) {
 
 function processSubscriptExpression(input) {
   const path = { type: 'path', children: [] }
-  let child = path
+  let index
   input.node.children.forEach(node => {
     switch (node.type) {
       case ';':
       case 'comment':
         break
       case '[':
-        const newChild = {
+        index = {
           type: 'index',
         }
-        child.children.push(newChild)
-        child = newChild
+        path.children.push(index)
       case 'identifier':
-        child.expression = {
-          type: 'reference',
-          name: node.text,
+        if (index) {
+          index.expression = {
+            type: 'reference',
+            name: node.text,
+          }
+        } else {
+          path.children.push({
+            type: 'reference',
+            name: node.text,
+          })
         }
         break
       case 'number_literal':
-        child.expression = {
+        index.expression = {
           type: 'number_literal',
           value: node.text,
         }
         break
       case 'binary_expression':
-        child.expression = processBinaryExpression({ ...input, node })
+        index.expression = processBinaryExpression({ ...input, node })
         break
       case 'field_expression':
-        child.children.push(
+        path.children.push(
           ...processFieldExpression({ ...input, node }).children,
         )
         break
       case 'subscript_expression':
-        child.children.push(
+        path.children.push(
           ...processSubscriptExpression({ ...input, node }).children,
         )
         break
       case ']':
-        child = path
+        index = undefined
         break
       default:
         throwNode(node, input.node)
@@ -1200,4 +1220,8 @@ function throwNode(node, ctx) {
       ctx?.type ?? 'file'
     }'`,
   )
+}
+
+function logJSON(obj) {
+  console.log(JSON.stringify(obj, null, 2))
 }

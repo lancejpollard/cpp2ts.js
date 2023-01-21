@@ -83,6 +83,9 @@ function process(input) {
     case 'boolean_literal':
       processBooleanLiteral(input)
       break
+    case 'return_statement':
+      processReturnStatement(input)
+      break
     case 'reference':
       processReference(input)
       break
@@ -107,18 +110,78 @@ function process(input) {
     case 'string_literal':
       processStringLiteral(input)
       break
+    case 'update_expression':
+      processUpdateExpression(input)
+      break
+    case 'case_statement':
+      processCaseStatement(input)
+      break
     default:
       throwNode(input.node)
   }
 }
 
+function processCaseStatement(input) {
+  const test = []
+  if (!input.node.isDefault) {
+    process({ ...input, node: input.node.test, body: test })
+  }
+
+  const statements = []
+  input.node.statements?.forEach(node => {
+    process({ ...input, node, body: statements })
+  })
+
+  if (input.node.isDefault) {
+    input.body.push(`default:${statements.length ? ` {` : ``}`)
+  } else {
+    input.body.push(
+      `case ${test.join(' ')}:${statements.length ? ` {` : ``}`,
+    )
+  }
+
+  statements.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
+
+  if (statements.length) {
+    input.body.push(`}`)
+  }
+}
+
+function processReturnStatement(input) {
+  const statement = []
+  process({ ...input, node: input.node.statement, body: statement })
+
+  if (statement.length === 1) {
+    input.body.push(`return ${statement.join('')}`)
+  } else {
+    input.body.push(`return (`)
+    statement.forEach(line => {
+      input.body.push(`  ${line}`)
+    })
+    input.body.push(')')
+  }
+}
+
 function processUserDefinedLiteral(input) {
-  input.body.push(input.node.value)
+  input.body.push(input.node.text)
 }
 
 function processThrowStatement(input) {}
 
 function processWhileStatement(input) {}
+
+function processUpdateExpression(input) {
+  const exp = []
+  process({ ...input, node: input.node.expression, body: exp })
+
+  if (input.node.isRightSide) {
+    input.body.push(`${exp.join('')}${input.node.operator}`)
+  } else {
+    input.body.push(`${input.node.operator}${exp.join('')}`)
+  }
+}
 
 function processUnaryExpression(input) {
   const exp = []
@@ -127,7 +190,21 @@ function processUnaryExpression(input) {
   input.body.push(`${input.node.operator}${exp.join(' ')}`)
 }
 
-function processAssignmentExpression(input) {}
+function processAssignmentExpression(input) {
+  const left = []
+  process({ ...input, node: input.node.left, body: left })
+
+  const right = []
+  process({ ...input, node: input.node.right, body: right })
+
+  input.body.push(
+    `${left.join(' ')} ${input.node.operator} ${right.shift()}`,
+  )
+
+  right.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
+}
 
 function processParenthesizedExpression(input) {
   const body = []
@@ -141,7 +218,11 @@ function processReference(input) {
 }
 
 function processNumberLiteral(input) {
-  input.body.push(input.node.value)
+  input.body.push(
+    input.node.value.startsWith('.')
+      ? `0${input.node.value}`
+      : input.node.value,
+  )
 }
 
 function processBooleanLiteral(input) {
@@ -157,7 +238,7 @@ function processBinaryExpression(input) {
   process({ ...input, node: input.node.left, body: left })
 
   // hack, I guess parser is giving something wrong.
-  if (input.node.left.type === 'number_literal') {
+  if (!input.node.right && input.node.left.type === 'number_literal') {
     input.body.push(`${input.node.operator}${left.join(' ')}`)
     return
   }
@@ -170,9 +251,52 @@ function processBinaryExpression(input) {
   )
 }
 
-function processSwitchStatement(input) {}
+function processSwitchStatement(input) {
+  const condition = []
+  process({ ...input, node: input.node.condition, body: condition })
 
-function processForStatement(input) {}
+  const statements = []
+  input.node.statements.forEach(node => {
+    process({ ...input, node, body: statements })
+  })
+
+  input.body.push(`switch (${condition.join(' ')}) {`)
+  statements.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
+  input.body.push(`}`)
+}
+
+function processForStatement(input) {
+  // init, test, update, body
+  const init = []
+  input.node.init.forEach(node => {
+    process({ ...input, node, body: init })
+  })
+
+  const test = []
+  process({ ...input, node: input.node.test, body: test })
+
+  const update = []
+  process({ ...input, node: input.node.update, body: update })
+
+  const body = []
+  input.node.body.forEach(node => {
+    process({ ...input, node, body })
+  })
+
+  input.body.push(
+    `for (${init.join(', ')}; ${test.join(' ')}; ${update.join(
+      ' ',
+    )}) {`,
+  )
+
+  body.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
+
+  input.body.push(`}`)
+}
 
 function processCallExpression(input) {
   const object = []
@@ -227,16 +351,70 @@ function processIfStatement(input) {
   })
 }
 
-function processConditionalExpression(input) {}
+function processConditionalExpression(input) {
+  // test, success, failure
+  const test = []
+  process({ ...input, node: input.node.test, body: test })
 
-function processPath(input) {}
+  const success = []
+  process({ ...input, node: input.node.success, body: success })
+
+  const failure = []
+  process({ ...input, node: input.node.failure, body: failure })
+
+  test.forEach((l, i) => {
+    if (i === 0) {
+      input.body.push(l)
+    } else {
+      input.body.push(`  ${l}`)
+    }
+  })
+
+  success.forEach((l, i) => {
+    if (i === 0) {
+      input.body.push(`  ? ${l}`)
+    } else {
+      input.body.push(`    ${l}`)
+    }
+  })
+
+  failure.forEach((l, i) => {
+    if (i === 0) {
+      input.body.push(`  : ${l}`)
+    } else {
+      input.body.push(`    ${l}`)
+    }
+  })
+}
+
+function processPath(input) {
+  const children = []
+
+  input.node.children.forEach((node, i) => {
+    const child = []
+    children.push(child)
+
+    if (node.type === 'index') {
+      child.push('[')
+      process({ ...input, node: node.expression, body: child })
+      child.push(']')
+    } else {
+      if (i > 0) {
+        child.push('.')
+      }
+      process({ ...input, node, body: child })
+    }
+  })
+
+  input.body.push(`${children.map(x => x.join('')).join('')}`)
+}
 
 function processFunctionDefinition(input) {
   const { returnType, name } = input.node
   const params = []
-  input.node.params?.forEach(node =>
-    process({ ...input, node, body: params, scope: undefined }),
-  )
+  input.node.parameters.forEach(node => {
+    params.push(`${node.name}: ${node.typeName}`)
+  })
 
   const body = []
   input.node.body.forEach(node => {
@@ -260,7 +438,7 @@ function processDeclaration(input) {
     const type = declarator.typeName
     const init = []
     if (declarator.init) {
-      process({ ...input, node: declarator.init })
+      process({ ...input, node: declarator.init, body: init })
       input.body.push(`let ${name}: ${type} = ${init.join('\n')}`)
     } else {
       input.body.push(`let ${name}: ${type}`)
@@ -270,7 +448,7 @@ function processDeclaration(input) {
 
 function processNamespace(input) {
   const path = input.path.concat([input.node.name])
-  const scope = 'namespace'
+  const scope = undefined // = 'namespace'
   input.node.body.forEach(node => {
     process({ ...input, node, path, scope })
   })
@@ -299,4 +477,8 @@ function getName(name, { path, scope }) {
     default:
       return name
   }
+}
+
+function logJSON(obj) {
+  console.log(JSON.stringify(obj, null, 2))
 }
