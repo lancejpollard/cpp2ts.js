@@ -1,8 +1,9 @@
+const _ = require('lodash')
 const prettier = require('prettier')
 const buildAST = require('./ast')
 
 function pretty(string) {
-  return prettier.format(convert(string), {
+  return prettier.format(string, {
     semi: false,
     parser: 'typescript',
     trailingComma: 'all',
@@ -42,7 +43,19 @@ function convert(string) {
     process({ ...state, node })
   })
 
-  return state.module.map(body => body.join('\n')).join('\n')
+  const out = []
+  state.module.forEach(body => {
+    let text = body.join('\n')
+    try {
+      text = pretty(text)
+    } catch (e) {
+      // couldn't make it pretty :/
+      // but you still get the output.
+    }
+    out.push(text)
+  })
+
+  return out.join('\n')
 }
 
 function process(input) {
@@ -168,7 +181,12 @@ function processUserDefinedLiteral(input) {
   input.body.push(input.node.text)
 }
 
-function processThrowStatement(input) {}
+function processThrowStatement(input) {
+  const expression = []
+  process({ ...input, node: input.node.expression, body: expression })
+
+  input.body.push(`throw ${expression.join('')}`)
+}
 
 function processWhileStatement(input) {
   const condition = []
@@ -427,7 +445,9 @@ function processFunctionDefinition(input) {
   const { returnType, name } = input.node
   const params = []
   input.node.parameters.forEach(node => {
-    params.push(`${node.name}: ${node.typeName}`)
+    params.push(
+      `${_.camelCase(node.name)}: ${getTypeName(node.typeName)}`,
+    )
   })
 
   const body = []
@@ -436,7 +456,9 @@ function processFunctionDefinition(input) {
   })
 
   input.body.push(
-    `function ${name}(${params.join(', ')}): ${returnType} {`,
+    `function ${_.camelCase(name)}(${params.join(', ')}): ${getTypeName(
+      returnType,
+    )} {`,
   )
 
   body.forEach(line => {
@@ -448,8 +470,8 @@ function processFunctionDefinition(input) {
 
 function processDeclaration(input) {
   input.node.declarators.forEach(declarator => {
-    const name = getName(declarator.name, input)
-    const type = declarator.typeName
+    const name = _.camelCase(getName(declarator.name, input))
+    const type = getTypeName(declarator.typeName)
     const init = []
     if (declarator.init) {
       process({ ...input, node: declarator.init, body: init })
@@ -495,4 +517,21 @@ function getName(name, { path, scope }) {
 
 function logJSON(obj) {
   console.log(JSON.stringify(obj, null, 2))
+}
+
+function pascalCase(str) {
+  return _.startCase(_.camelCase(str))
+}
+
+function getTypeName(name) {
+  switch (name) {
+    case 'int':
+      return 'number'
+    case 'number':
+      return 'number'
+    case 'void':
+      return 'void'
+    default:
+      return pascalCase(name)
+  }
 }
