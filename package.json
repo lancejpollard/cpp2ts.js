@@ -7,7 +7,9 @@
     "src"
   ],
   "dependencies": {
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.21",
+    "tree-sitter": "^0.20.1",
+    "tree-sitter-cpp": "^0.20.0"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^5.48.1",
