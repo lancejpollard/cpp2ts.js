@@ -38,159 +38,241 @@ function convert(string) {
     body,
   }
 
-  process({ ...state, node: tree.rootNode })
+  tree.body.forEach(node => {
+    process({ ...state, node })
+  })
 
   return state.module.map(body => body.join('\n')).join('\n')
 }
 
 function process(input) {
   switch (input.node.type) {
-    case 'translation_unit':
-      processChildren(input)
+    case 'namespace':
+      processNamespace(input)
       break
-    case 'comment':
+    case 'declaration':
+      processDeclaration(input)
       break
-    case 'preproc_include':
+    case 'function_definition':
+      processFunctionDefinition(input)
       break
-    case 'namespace_definition':
-      processNamespaceDefinition(input)
+    case 'binary_expression':
+      processBinaryExpression(input)
       break
-    case '{':
-    case '}':
-    case '(':
-    case ')':
-    case ';':
+    case 'path':
+      processPath(input)
+      break
+    case 'switch_statement':
+      processSwitchStatement(input)
+      break
+    case 'if_statement':
+      processIfStatement(input)
+      break
+    case 'conditional_expression':
+      processConditionalExpression(input)
+      break
+    case 'call_expression':
+      processCallExpression(input)
+      break
+    case 'for_statement':
+      processForStatement(input)
+      break
+    case 'number_literal':
+      processNumberLiteral(input)
+      break
+    case 'boolean_literal':
+      processBooleanLiteral(input)
+      break
+    case 'reference':
+      processReference(input)
+      break
+    case 'assignment_expression':
+      processAssignmentExpression(input)
+      break
+    case 'unary_expression':
+      processUnaryExpression(input)
+      break
+    case 'while_statement':
+      processWhileStatement(input)
+      break
+    case 'throw_statement':
+      processThrowStatement(input)
+      break
+    case 'parenthesized_expression':
+      processParenthesizedExpression(input)
+      break
+    case 'user_defined_literal':
+      processUserDefinedLiteral(input)
+      break
+    case 'string_literal':
+      processStringLiteral(input)
       break
     default:
       throwNode(input.node)
   }
 }
 
-function processChildren(input) {
-  input.node.children.forEach(node => {
-    process({ ...input, node })
+function processUserDefinedLiteral(input) {
+  input.body.push(input.node.value)
+}
+
+function processThrowStatement(input) {}
+
+function processWhileStatement(input) {}
+
+function processUnaryExpression(input) {
+  const exp = []
+  process({ ...input, node: input.node.expression, body: exp })
+
+  input.body.push(`${input.node.operator}${exp.join(' ')}`)
+}
+
+function processAssignmentExpression(input) {}
+
+function processParenthesizedExpression(input) {
+  const body = []
+  process({ ...input, node: input.node.value, body })
+
+  input.body.push(`(${body.join(' ')})`)
+}
+
+function processReference(input) {
+  input.body.push(input.node.name)
+}
+
+function processNumberLiteral(input) {
+  input.body.push(input.node.value)
+}
+
+function processBooleanLiteral(input) {
+  input.body.push(input.node.value)
+}
+
+function processStringLiteral(input) {
+  input.body.push(input.node.value)
+}
+
+function processBinaryExpression(input) {
+  const left = []
+  process({ ...input, node: input.node.left, body: left })
+
+  // hack, I guess parser is giving something wrong.
+  if (input.node.left.type === 'number_literal') {
+    input.body.push(`${input.node.operator}${left.join(' ')}`)
+    return
+  }
+
+  const right = []
+  process({ ...input, node: input.node.right, body: right })
+
+  input.body.push(
+    `${left.join(' ')} ${input.node.operator} ${right.join(' ')}`,
+  )
+}
+
+function processSwitchStatement(input) {}
+
+function processForStatement(input) {}
+
+function processCallExpression(input) {
+  const object = []
+  process({ ...input, node: input.node.object, body: object })
+
+  const args = []
+  input.node.args.forEach(node => {
+    const arg = []
+    args.push(arg)
+    process({ ...input, node, body: arg })
   })
+
+  input.body.push(
+    `${object.join('')}(${args.map(arg => arg.join('\n')).join(', ')})`,
+  )
+}
+
+function processIfStatement(input) {
+  input.node.choices.forEach((choice, i) => {
+    const condition = []
+    if (choice.condition) {
+      process({ ...input, node: choice.condition, body: condition })
+    }
+
+    const statements = []
+
+    choice.statements.forEach(statement => {
+      process({ ...input, node: statement, body: statements })
+    })
+
+    if (i === 0) {
+      input.body.push(`if (${condition.join('\n')}) {`)
+
+      statements.forEach(line => {
+        input.body.push(`  ${line}`)
+      })
+
+      input.body.push('}')
+    } else {
+      if (condition.length) {
+        input.body.push(`else if (${condition.join('\n')}) {`)
+      } else {
+        input.body.push(`else {`)
+      }
+
+      statements.forEach(line => {
+        input.body.push(`  ${line}`)
+      })
+
+      input.body.push('}')
+    }
+  })
+}
+
+function processConditionalExpression(input) {}
+
+function processPath(input) {}
+
+function processFunctionDefinition(input) {
+  const { returnType, name } = input.node
+  const params = []
+  input.node.params?.forEach(node =>
+    process({ ...input, node, body: params, scope: undefined }),
+  )
+
+  const body = []
+  input.node.body.forEach(node => {
+    process({ ...input, node, body, scope: 'function' })
+  })
+
+  input.body.push(
+    `function ${name}(${params.join(', ')}): ${returnType} {`,
+  )
+
+  body.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
+
+  input.body.push('}')
 }
 
 function processDeclaration(input) {
-  let info = {}
-  input.node.children.forEach(node => {
-    switch (node.type) {
-      case 'type_identifier':
-        info.type = node.text
-        break
-      case 'identifier':
-        info.name = node.text
-        break
-      case ';':
-        break
-      default:
-        throwNode(node, input.node)
-    }
-  })
-
-  input.body.push(`let ${getName(info.name, input)}: ${info.type}`)
-}
-
-function getName(name, { path, scope }) {
-  switch (scope) {
-    case 'namespace': {
-      const parts = path.concat()
-      parts.push(name)
-      return parts.join('_')
-    }
-    default:
-      return name
-  }
-}
-
-function processNamespaceDefinition(input) {
-  let path = input.path.concat()
-  input.node.children.forEach(node => {
-    switch (node.type) {
-      case 'namespace':
-        break
-      case 'identifier':
-        path.push(node.text)
-        break
-      case 'declaration_list':
-        processDeclarationList({
-          ...input,
-          node,
-          path,
-          scope: 'namespace',
-        })
-        break
-      default:
-        throwNode(node, input.node)
+  input.node.declarators.forEach(declarator => {
+    const name = getName(declarator.name, input)
+    const type = declarator.typeName
+    const init = []
+    if (declarator.init) {
+      process({ ...input, node: declarator.init })
+      input.body.push(`let ${name}: ${type} = ${init.join('\n')}`)
+    } else {
+      input.body.push(`let ${name}: ${type}`)
     }
   })
 }
 
-function processDeclarationList(input) {
-  input.node.children.forEach(node => {
-    switch (node.type) {
-      case 'preproc_if':
-        break
-      case '{':
-      case '}':
-      case 'comment':
-        break
-      case 'function_definition':
-        processFunctionDefinition({ ...input, node })
-        break
-      case 'declaration':
-        processDeclaration({ ...input, node })
-        break
-      default:
-        throwNode(node, input.node)
-    }
-  })
-}
-
-function processFunctionDefinition(input) {
-  const info = {}
-  input.node.children.forEach(node => {
-    switch (node.type) {
-      case '{':
-      case '}':
-      case 'comment':
-        break
-      case 'type_identifier':
-        info.returnType = node.text
-        break
-      case 'ERROR':
-        info.returnType = node.text
-        break
-      case 'function_declarator':
-        processFunctionDeclarator({ ...input, node })
-        break
-      default:
-        throwNode(node, input.node)
-    }
-  })
-}
-
-function processFunctionDeclarator(input) {
-  const info = {}
-  input.node.children.forEach(node => {
-    switch (node.type) {
-      case '{':
-      case '}':
-      case 'comment':
-        break
-      case 'identifier':
-        info.name = node.text
-        break
-      case 'ERROR':
-        info.returnType = node.text
-        break
-      case 'function_declarator':
-        processFunctionDeclarator({ ...input, node })
-        break
-      default:
-        throwNode(node, input.node)
-    }
+function processNamespace(input) {
+  const path = input.path.concat([input.node.name])
+  const scope = 'namespace'
+  input.node.body.forEach(node => {
+    process({ ...input, node, path, scope })
   })
 }
 
@@ -206,3 +288,15 @@ function throwNode(node, ctx) {
 module.exports = convert
 
 convert.pretty = pretty
+
+function getName(name, { path, scope }) {
+  switch (scope) {
+    case 'namespace': {
+      const parts = path.concat()
+      parts.push(name)
+      return parts.join('_')
+    }
+    default:
+      return name
+  }
+}

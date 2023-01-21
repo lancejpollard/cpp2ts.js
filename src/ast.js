@@ -10,22 +10,23 @@ function build(string) {
   const tree = parser.parse(string)
   const body = []
 
-  process({ body, node: tree.rootNode })
+  body.push(...process({ node: tree.rootNode }))
 
-  return body
+  return { type: 'program', body }
 }
 
 function process(input) {
+  const body = []
   switch (input.node.type) {
     case 'translation_unit':
-      processChildren(input)
+      body.push(...processChildren(input))
       break
     case 'comment':
       break
     case 'preproc_include':
       break
     case 'namespace_definition':
-      processNamespaceDefinition(input)
+      body.push(processNamespaceDefinition(input))
       break
     case '{':
     case '}':
@@ -36,12 +37,15 @@ function process(input) {
     default:
       throwNode(input.node)
   }
+  return body
 }
 
 function processChildren(input) {
+  const body = []
   input.node.children.forEach(node => {
-    process({ ...input, node })
+    body.push(...process({ ...input, node }))
   })
+  return body
 }
 
 function processInitDeclarator(input) {
@@ -52,8 +56,20 @@ function processInitDeclarator(input) {
       case 'type_identifier':
         info.typeName = node.text
         break
+      case 'qualified_identifier':
       case 'identifier':
-        info.name = node.text
+        info.name = node.text.replace(/[\s:]+/g, '_')
+        break
+      case 'initializer_list':
+        // TODO
+        // console.log(input.node.text)
+        // throwNode(node)
+        break
+      case 'reference_declarator':
+        info.init = processReferenceDeclarator({ ...input, node })
+        break
+      case 'subscript_expression':
+        info.init = processSubscriptExpression({ ...input, node })
         break
       case 'conditional_expression':
         info.init = processConditionalExpression({ ...input, node })
@@ -98,6 +114,9 @@ function processDeclaration(input) {
         break
       case 'auto':
         break
+      case 'sized_type_specifier':
+        // TODO
+        break
       case 'ERROR': {
         const dec = processDeclaration({ ...input, node })
         const first = dec.declarators.shift()
@@ -112,6 +131,15 @@ function processDeclaration(input) {
         const init = processInitDeclarator({ ...input, node })
         declarator.name = init.name
         declarator.init = init.init
+        break
+      }
+      case 'template_type':
+        // TODO
+        break
+      case 'function_declarator': {
+        // console.log(input.node.text)
+        // throwNode(node)
+        // TODO
         break
       }
       case ',':
@@ -139,7 +167,7 @@ function processNamespaceDefinition(input) {
         info.name = node.text
         break
       case 'declaration_list':
-        info.push(
+        info.body.push(
           ...processDeclarationList({
             ...input,
             node,
@@ -150,6 +178,7 @@ function processNamespaceDefinition(input) {
         throwNode(node, input.node)
     }
   })
+  return info
 }
 
 function processDeclarationList(input) {
@@ -186,6 +215,7 @@ function processFunctionDefinition(input) {
       case 'comment':
         break
       case 'type_identifier':
+      case 'primitive_type':
         info.returnType = node.text
         break
       case 'ERROR':
@@ -193,10 +223,10 @@ function processFunctionDefinition(input) {
         break
       case 'function_declarator': {
         const dec = processFunctionDeclarator({ ...input, node })
-        input.name = dec.name
-        input.params = dec.params
+        info.name = dec.name
+        info.params = dec.params
         if (dec.typeName) {
-          input.returnType = dec.typeName
+          info.returnType = dec.typeName
         }
         break
       }
@@ -207,6 +237,8 @@ function processFunctionDefinition(input) {
         throwNode(node, input.node)
     }
   })
+
+  return info
 }
 
 function processIfStatement(input) {
@@ -229,9 +261,14 @@ function processIfStatement(input) {
       case 'condition_clause':
         choice.condition = processConditionClause({ ...input, node })
         break
+      case 'throw_statement':
+        choice.statements.push(
+          processThrowStatement({ ...input, node }),
+        )
+        break
       case 'expression_statement':
         choice.statements.push(
-          processExpressionStatement({ ...input, node }),
+          ...processExpressionStatement({ ...input, node }),
         )
         break
       case 'return_statement':
@@ -241,6 +278,9 @@ function processIfStatement(input) {
         break
       case 'if_statement':
         choice.statements.push(processIfStatement({ ...input, node }))
+        break
+      case 'for_statement':
+        choice.statements.push(processForStatement({ ...input, node }))
         break
       default:
         throwNode(node, input.node)
@@ -284,7 +324,12 @@ function processForStatement(input) {
         info.body.push(processIfStatement({ ...input, node }))
         break
       case 'expression_statement':
-        info.body.push(processExpressionStatement({ ...input, node }))
+        info.body.push(
+          ...processExpressionStatement({ ...input, node }),
+        )
+        break
+      case 'for_statement':
+        info.body.push(processForStatement({ ...input, node }))
         break
       case 'update_expression':
         info.update = processUpdateExpression({ ...input, node })
@@ -308,13 +353,23 @@ function processForStatement(input) {
   return info
 }
 
-function processCompoundStatement(input) {
+function processWhileStatement(input) {
   const statements = []
+  let condition
+
   input.node.children.forEach(node => {
     switch (node.type) {
       case '{':
       case '}':
       case 'comment':
+      case 'while':
+      case 'preproc_if':
+        break
+      case 'condition_clause':
+        condition = processConditionClause({ ...input, node })
+        break
+      case 'while_statement':
+        statements.push(processWhileStatement({ ...input, node }))
         break
       case 'declaration':
         statements.push(processDeclaration({ ...input, node }))
@@ -323,7 +378,48 @@ function processCompoundStatement(input) {
         statements.push(processForStatement({ ...input, node }))
         break
       case 'expression_statement':
-        statements.push(processExpressionStatement({ ...input, node }))
+        statements.push(
+          ...processExpressionStatement({ ...input, node }),
+        )
+        break
+      case 'if_statement':
+        statements.push(processIfStatement({ ...input, node }))
+        break
+      case 'return_statement':
+        statements.push(processReturnStatement({ ...input, node }))
+        break
+      case 'switch_statement':
+        statements.push(processSwitchStatement({ ...input, node }))
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return { type: 'while_statement', condition, statements }
+}
+
+function processCompoundStatement(input) {
+  const statements = []
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '{':
+      case '}':
+      case 'comment':
+      case 'preproc_if':
+        break
+      case 'while_statement':
+        statements.push(processWhileStatement({ ...input, node }))
+        break
+      case 'declaration':
+        statements.push(processDeclaration({ ...input, node }))
+        break
+      case 'for_statement':
+        statements.push(processForStatement({ ...input, node }))
+        break
+      case 'expression_statement':
+        statements.push(
+          ...processExpressionStatement({ ...input, node }),
+        )
         break
       case 'if_statement':
         statements.push(processIfStatement({ ...input, node }))
@@ -370,11 +466,20 @@ function processAssignmentExpression(input) {
       case 'subscript_expression':
         sides.push(processSubscriptExpression({ ...input, node }))
         break
+      case 'field_expression':
+        sides.push(processFieldExpression({ ...input, node }))
+        break
+      case 'parenthesized_expression':
+        sides.push(processParenthesizedExpression({ ...input, node }))
+        break
       case 'call_expression':
         sides.push(processCallExpression({ ...input, node }))
         break
       case 'binary_expression':
         sides.push(processBinaryExpression({ ...input, node }))
+        break
+      case 'unary_expression':
+        sides.push(processUnaryExpression({ ...input, node }))
         break
       case 'assignment_expression':
         sides.push(processAssignmentExpression({ ...input, node }))
@@ -394,24 +499,51 @@ function processAssignmentExpression(input) {
   return { type: 'assignment_expression', left, operator, right }
 }
 
-function processExpressionStatement(input) {
-  let statement
+function processCommaExpression(input) {
+  let statements = []
   input.node.children.forEach(node => {
     switch (node.type) {
       case ';':
+      case ',':
       case 'comment':
         break
       case 'assignment_expression':
-        statement = processAssignmentExpression({ ...input, node })
+        statements.push(processAssignmentExpression({ ...input, node }))
+        break
+      case 'comma_expression':
+        statements.push(...processCommaExpression({ ...input, node }))
         break
       case 'call_expression':
-        statement = processCallExpression({ ...input, node })
+        statements.push(processCallExpression({ ...input, node }))
         break
       default:
         throwNode(node, input.node)
     }
   })
-  return statement
+  return statements
+}
+
+function processExpressionStatement(input) {
+  let statements = []
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case ';':
+      case 'comment':
+        break
+      case 'comma_expression':
+        statements.push(...processCommaExpression({ ...input, node }))
+        break
+      case 'assignment_expression':
+        statements.push(processAssignmentExpression({ ...input, node }))
+        break
+      case 'call_expression':
+        statements.push(processCallExpression({ ...input, node }))
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return statements
 }
 
 function processCaseStatement(input) {
@@ -442,11 +574,38 @@ function processCaseStatement(input) {
       case 'compound_statement':
         statements = processCompoundStatement({ ...input, node })
         break
+      case 'if_statement':
+        statements = [processIfStatement({ ...input, node })]
+        break
+      case 'throw_statement':
+        statements = [processThrowStatement({ ...input, node })]
+        break
       default:
         throwNode(node, input.node)
     }
   })
   return { type: 'case_statement', isDefault, test, statements }
+}
+
+function processThrowStatement(input) {
+  let expression
+
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '{':
+      case '}':
+      case ';':
+      case 'comment':
+      case 'throw':
+        break
+      case 'call_expression':
+        expression = processCallExpression({ ...input, node })
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return { type: 'throw_statement', expression }
 }
 
 function processSwitchStatement(input) {
@@ -495,6 +654,9 @@ function processConditionClause(input) {
         break
       case 'binary_expression':
         condition = processBinaryExpression({ ...input, node })
+        break
+      case 'unary_expression':
+        condition = processUnaryExpression({ ...input, node })
         break
       default:
         throwNode(node, input.node)
@@ -580,9 +742,10 @@ function processConditionalExpression(input) {
         })
         break
       case 'identifier':
+      case 'qualified_identifier':
         phases.push({
           type: 'reference',
-          name: node.text,
+          name: node.text.replace(/[\s:]+/g, '_'),
         })
         break
       case 'conditional_expression':
@@ -626,6 +789,18 @@ function processArgumentList(input) {
           value: node.text,
         })
         break
+      case 'user_defined_literal':
+        args.push({
+          type: 'user_defined_literal',
+          value: node.text,
+        })
+        break
+      case 'string_literal':
+        args.push({
+          type: 'string_literal',
+          value: node.text,
+        })
+        break
       case 'conditional_expression':
         args.push(processConditionalExpression({ ...input, node }))
         break
@@ -640,6 +815,9 @@ function processArgumentList(input) {
         break
       case 'subscript_expression':
         args.push(processSubscriptExpression({ ...input, node }))
+        break
+      case 'field_expression':
+        args.push(processFieldExpression({ ...input, node }))
         break
       case 'binary_expression':
         args.push(processBinaryExpression({ ...input, node }))
@@ -704,6 +882,9 @@ function processSubscriptExpression(input) {
           value: node.text,
         }
         break
+      case 'binary_expression':
+        child.expression = processBinaryExpression({ ...input, node })
+        break
       case 'field_expression':
         child.children.push(
           ...processFieldExpression({ ...input, node }).children,
@@ -742,6 +923,7 @@ function processFieldExpression(input) {
         )
         break
       case 'field_identifier':
+      case 'identifier':
         path.children.push({
           type: 'reference',
           name: node.text,
@@ -764,10 +946,12 @@ function processBinaryExpression(input) {
   input.node.children.forEach(node => {
     switch (node.type) {
       case 'comment':
+        break
+      case 'qualified_identifier':
       case 'identifier':
         expressions.push({
           type: 'reference',
-          name: node.text,
+          name: node.text.replace(/[\s:]+/g, '_'),
         })
         break
       case 'number_literal':
@@ -780,6 +964,7 @@ function processBinaryExpression(input) {
       case '/':
       case '+':
       case '-':
+      case '%':
       case '>':
       case '>=':
       case '<':
@@ -797,6 +982,12 @@ function processBinaryExpression(input) {
         break
       case 'subscript_expression':
         expressions.push(processSubscriptExpression({ ...input, node }))
+        break
+      case 'cast_expression':
+        // TODO
+        break
+      case 'field_expression':
+        expressions.push(processFieldExpression({ ...input, node }))
         break
       case 'unary_expression':
         expressions.push(processUnaryExpression({ ...input, node }))
@@ -824,7 +1015,7 @@ function processBinaryExpression(input) {
   })
   const left = expressions[0]
   const right = expressions[1]
-  return { operator, left, right }
+  return { type: 'binary_expression', operator, left, right }
 }
 
 function processUnaryExpression(input) {
@@ -837,6 +1028,7 @@ function processUnaryExpression(input) {
         break
       case '!':
       case '-':
+      case '+':
         exp.operator = node.type
         break
       case 'subscript_expression':
@@ -981,6 +1173,16 @@ function processParameterDeclaration(input) {
         info.name = ref.name
         break
       }
+      case 'ERROR': {
+        const ref = processParameterDeclaration({ ...input, node })
+        info.name = ref.name
+        info.typeName = ref.typeName
+        break
+      }
+      case 'function_declarator':
+        info.type = 'error'
+        info.text = node.text
+        break
       case 'identifier':
         info.name = node.text
         break
