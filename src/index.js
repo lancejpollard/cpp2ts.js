@@ -170,7 +170,21 @@ function processUserDefinedLiteral(input) {
 
 function processThrowStatement(input) {}
 
-function processWhileStatement(input) {}
+function processWhileStatement(input) {
+  const condition = []
+  process({ ...input, node: input.node.condition, body: condition })
+
+  const statements = []
+  input.node.statements.forEach(node => {
+    process({ ...input, node, body: statements })
+  })
+
+  input.body.push(`while (${condition.join(' ')}) {`)
+  statements.forEach(line => {
+    input.body.push(`  ${line}`)
+  })
+  input.body.push(`}`)
+}
 
 function processUpdateExpression(input) {
   const exp = []
