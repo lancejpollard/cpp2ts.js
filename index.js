@@ -3,6 +3,12 @@ const prettier = require('prettier')
 module.exports = convert
 
 function convert(jsonAst) {
+  return traverseAST(jsonAst)
+}
+
+convert.pretty = pretty
+
+function pretty(jsonAst) {
   return prettier.format(traverseAST(jsonAst), {
     semi: false,
     parser: 'typescript',
@@ -17,7 +23,6 @@ function convert(jsonAst) {
     proseWrap: 'always',
     endOfLine: 'lf',
     singleAttributePerLine: true,
-    prettierPath: './node_modules/prettier',
     importOrder: [
       '^\\w(.*)$',
       '^@(.*)$',
@@ -31,38 +36,37 @@ function convert(jsonAst) {
 }
 
 function traverseAST(ast) {
-  const text = []
-  ast.inner.forEach(node => text.push(...processNode(node)))
-  return text.join('\n')
+  const body = []
+  const module = [body]
+  const path = []
+  ast.inner.forEach(node => processNode({ node, body, module, path }))
+  return module.map(body => body.join('\n')).join('\n')
 }
 
-function traverseNamespace(node, options = {}) {
-  const text = []
-  const path = options.path ?? []
-  path.push(node.name)
-  const childOptions = { ...options, path }
-  node.inner?.forEach(node =>
-    text.push(...processNode(node, childOptions)),
+function traverseNamespace(input) {
+  const childPath = input.path.concat()
+  childPath.push(input.node.name)
+  input.node.inner?.forEach(node =>
+    processNode({ ...input, node, path: childPath }),
   )
-  return text
 }
 
-function processNode(node, options = {}) {
+function processNode(input) {
   const text = []
-  switch (node.kind) {
-    case 'ClassTemplateDecl':
-      text.push(...traverseClassTemplate(node, options))
+  switch (input.node.kind) {
+    case 'ClassTemplateDecl': {
+      const body = []
+      input.module.push(body)
+      traverseClassTemplate({ ...input, body })
       break
+    }
     case 'NamespaceDecl':
-      traverseNamespace(node).forEach(line => {
-        text.push(line)
-      })
+      traverseNamespace(input)
       break
     case 'FullComment':
       // skip
       break
-    case 'TypedefDecl':
-      text.push(`class ${getName(node.name, options.path)} {`)
+    case 'TypedefDecl': {
       // {
       //   "kind": "TypedefDecl",
       //   "isImplicit": true,
@@ -80,13 +84,11 @@ function processNode(node, options = {}) {
       //     }
       //   ]
       // }
-      node.inner?.forEach(node => {
-        processNode(node, options).forEach(line => {
-          text.push(`  ${line}`)
-        })
-      })
-      text.push('}')
+      const body = []
+      input.module.push(body)
+      traverseTypedefDecl({ ...input, body })
       break
+    }
     case 'RecordType':
       // records are structs
       // https://jcsites.juniata.edu/faculty/rhodes/cs2/ch05a.htm
@@ -251,8 +253,8 @@ function processNode(node, options = {}) {
       //     }
       //   ]
       // }
-      if (node.tagUsed === 'union') {
-        text.push(...traverseUnion(node, options))
+      if (input.node.tagUsed === 'union') {
+        traverseUnion(input)
       }
       break
     case 'ElaboratedType':
@@ -281,7 +283,7 @@ function processNode(node, options = {}) {
       //   ]
       // }
       break
-    case 'TypedefType':
+    case 'TypedefType': {
       // {
       //   "kind": "TypedefType",
       //   "type": {
@@ -319,8 +321,11 @@ function processNode(node, options = {}) {
       //     }
       //   ]
       // }
-      text.push(...traverseTypedef(node, options))
+      const body = []
+      input.module.push(body)
+      traverseTypedef({ ...input, body })
       break
+    }
     case 'LinkageSpecDecl':
       // {
       //   "kind": "LinkageSpecDecl",
@@ -338,7 +343,7 @@ function processNode(node, options = {}) {
       //   },
       //   "inline": true,
       //   "inner": [
-      text.push(...traverseFunctionDecl(node, options))
+      traverseFunctionDecl(input)
       break
     case 'ParmVarDecl':
       // {
@@ -350,18 +355,18 @@ function processNode(node, options = {}) {
       //     "qualType": "int"
       //   }
       // }
-      text.push(...traverseFunctionParam(node, options))
+      traverseFunctionParam(input)
       break
     case 'CompoundStmt':
-      node.inner?.forEach(node => {
-        text.push(...processNode(node, options))
+      input.node.inner?.forEach(node => {
+        processNode({ ...input, node })
       })
       break
     case 'IfStmt':
       // "kind": "IfStmt",
       // "hasElse": true,
       // "inner": [
-      text.push(...traverseIfStmt(node, options))
+      traverseIfStmt(input)
       break
     case 'BinaryOperator':
       // {
@@ -372,7 +377,7 @@ function processNode(node, options = {}) {
       //   "valueCategory": "prvalue",
       //   "opcode": "||",
       //   "inner": [
-      text.push(...traverseBinaryOperator(node, options))
+      traverseBinaryOperator(input)
       break
     case 'ImplicitCastExpr':
       // {
@@ -383,7 +388,7 @@ function processNode(node, options = {}) {
       //   "valueCategory": "prvalue",
       //   "castKind": "LValueToRValue",
       //   "inner": [
-      text.push(...traverseImplicitCastExpr(node, options))
+      traverseImplicitCastExpr(input)
       break
     case 'UnaryOperator':
       // {
@@ -395,7 +400,7 @@ function processNode(node, options = {}) {
       //   "isPostfix": false,
       //   "opcode": "--",
       //   "inner": [
-      text.push(...traverseUnaryOperator(node, options))
+      traverseUnaryOperator(input)
       break
     case 'MemberExpr':
       // {
@@ -408,7 +413,7 @@ function processNode(node, options = {}) {
       //   "isArrow": true,
       //   "referencedMemberDecl": "0x7fecd488b010",
       //   "inner": [
-      text.push(...traverseMemberExpr(node, options))
+      traverseMemberExpr(input)
       break
     case 'DeclRefExpr':
       // A reference to a declared variable, function, enum, etc.
@@ -428,7 +433,7 @@ function processNode(node, options = {}) {
       //     }
       //   }
       // }
-      text.push(...traverseDeclaration(node, options))
+      traverseDeclaration(input)
       break
     case 'IntegerLiteral':
       // {
@@ -439,7 +444,7 @@ function processNode(node, options = {}) {
       //   "valueCategory": "prvalue",
       //   "value": "0"
       // }
-      text.push(...traverseIntegerLiteral(node, options))
+      traverseIntegerLiteral(input)
       break
     case 'ParenExpr':
       // {
@@ -449,7 +454,7 @@ function processNode(node, options = {}) {
       //   },
       //   "valueCategory": "prvalue",
       //   "inner": [
-      text.push(...traverseParenExpr(node, options))
+      traverseParenExpr(input)
       break
     case 'CStyleCastExpr':
       // {
@@ -460,7 +465,7 @@ function processNode(node, options = {}) {
       //   "valueCategory": "prvalue",
       //   "castKind": "NoOp",
       //   "inner": [
-      text.push(...traverseParenExpr(node, options))
+      traverseParenExpr(input)
       break
     case 'CharacterLiteral':
       // {
@@ -471,13 +476,13 @@ function processNode(node, options = {}) {
       //   "valueCategory": "prvalue",
       //   "value": 10
       // }
-      text.push(...traverseCharacterLiteral(node, options))
+      traverseCharacterLiteral(input)
       break
     case 'ReturnStmt':
       // {
       //   "kind": "ReturnStmt",
       //   "inner": [
-      text.push(...traverseReturnStmt(node, options))
+      traverseReturnStmt(input)
       break
     case 'CallExpr':
       // {
@@ -487,7 +492,7 @@ function processNode(node, options = {}) {
       //   },
       //   "valueCategory": "prvalue",
       //   "inner": [
-      text.push(...traverseCallExpr(node, options))
+      traverseCallExpr(input)
       break
     case 'AlwaysInlineAttr':
       // {
@@ -502,7 +507,7 @@ function processNode(node, options = {}) {
       //   },
       //   "valueCategory": "prvalue",
       //   "inner": [
-      text.push(...traverseExprWithCleanups(node, options))
+      traverseExprWithCleanups(input)
       break
     case 'CXXConstructExpr':
       // {
@@ -607,158 +612,139 @@ function processNode(node, options = {}) {
   return text
 }
 
-function traverseTypedef(node, options) {
-  const header = [`class ${node.decl.name} {`]
-  const text = [header.join('')]
-  node.inner.forEach(node => text.push(...processNode(node, options)))
-  text.push('}')
-  return text
+function traverseTypedefDecl(input) {
+  input.body.push(`class ${getName(input.node.name, input.path)} {`)
+  input.node.inner?.forEach(node => {
+    processNode({ ...input, node })
+  })
+  input.body.push('}')
 }
 
-function traverseFunctionDecl(node, options) {
-  const header = [`function ${node.name} {`]
-  const text = [header.join('')]
-  node.inner?.forEach(node => text.push(...processNode(node, options)))
-  text.push('}')
-  return text
+function traverseTypedef(input) {
+  const header = [`class ${input.node.decl.name} {`]
+  input.body.push(header.join(''))
+  input.node.inner.forEach(node => processNode({ ...input, node }))
+  input.body.push('}')
 }
 
-function traverseFunctionParam(node, options) {
+function traverseFunctionDecl(input) {
+  const header = [`function ${input.node.name}() {`]
+  input.body.push(header.join(''))
+  input.node.inner?.forEach(node => processNode({ ...input, node }))
+  input.body.push('}')
+}
+
+function traverseFunctionParam(input) {
   const header = []
-  header.push(`${node.name}: ${getType(node.type.qualType)}`)
-  const text = [header.join('')]
-  return text
+  header.push(
+    `${input.node.name}: ${getType(input.node.type.qualType)}`,
+  )
+  input.body.push(header.join(''))
 }
 
-function traverseIfStmt(node, options) {
+function traverseIfStmt(input) {
   const condition = []
-  const text = []
-  node.inner.forEach(node => text.push(...processNode(node, options)))
-  return text
+  input.node.inner.forEach(node => processNode({ ...input, node }))
 }
 
-function traverseBinaryOperator(node, options) {
-  const text = []
-  const op = node.opcode
+function traverseBinaryOperator(input) {
+  const op = input.node.opcode
   const sides = []
-  node.inner.forEach(node => {
-    sides.push(processNode(node, options))
+  input.node.inner.forEach(node => {
+    processNode({ ...input, node, body: sides })
   })
 
-  text.push(sides.map(side => `(${side.join('\n')})`).join(` ${op} `))
-  return text
+  input.body.push(sides.join(` ${op} `))
 }
 
-function traverseImplicitCastExpr(node, options) {
-  const text = []
-  node.inner.forEach(node => text.push(...processNode(node, options)))
-  return text
+function traverseImplicitCastExpr(input) {
+  input.node.inner.forEach(node => processNode({ ...input, node }))
 }
 
-function traverseUnaryOperator(node, options) {
-  const text = []
-  const { isPostix } = node
-  const op = node.opcode
+function traverseUnaryOperator(input) {
+  const { isPostix } = input.node
+  const op = input.node.opcode
   const sides = []
-  node.inner.forEach(node => {
-    sides.push(processNode(node, options))
+  input.node.inner.forEach(node => {
+    processNode({ ...input, node, body: sides })
   })
   if (isPostix) {
-    text.push(sides.map(side => `(${side.join('\n')})`).join('') + op)
+    input.body.push(sides.join('\n') + op)
   } else {
-    text.push(
-      `${op}` + sides.map(side => `(${side.join('\n')})`).join(''),
-    )
+    input.body.push(`${op}` + sides.join('\n'))
   }
-  return text
 }
 
-function traverseMemberExpr(node, options) {
-  const text = []
-  const { isArrow } = node
+function traverseMemberExpr(input) {
+  const { isArrow } = input.node
   const header = []
-  header.push(`${node.name}.`)
-  node.inner.forEach(node => header.push(...processNode(node, options)))
-  text.push(header.join(''))
-  return text
+  header.push(`${input.node.name}.`)
+  input.node.inner.forEach(node => {
+    processNode({ ...input, node, body: header })
+  })
+  input.body.push(header.join(''))
 }
 
-function traverseDeclaration(node, options) {
-  const text = []
-  const typeInfo = getTypeInfo(node.type.qualType)
+function traverseDeclaration(input) {
+  const typeInfo = getTypeInfo(input.node.type.qualType)
   const header = []
   if (typeInfo.ref) {
     header.push(`/* ref */ `)
   }
-  header.push(`let ${node.referencedDecl.name}: ${typeInfo.name}`)
-  return text
+  header.push(`let ${input.node.referencedDecl.name}: ${typeInfo.name}`)
+  input.body.push(header.join(''))
 }
 
-function traverseIntegerLiteral(node, options) {
-  const text = []
-  const typeName = getType(node.type.qualType)
-  const value = parseInt(node.value, 10)
-  text.push(value)
-  return text
+function traverseIntegerLiteral(input) {
+  const typeName = getType(input.node.type.qualType)
+  const value = parseInt(input.node.value, 10)
+  input.body.push(value)
 }
 
-function traverseParenExpr(node, options) {
-  const text = ['(']
-  node.inner.forEach(node => text.push(...processNode(node, options)))
-  text.push(')')
-  return text
+function traverseParenExpr(input) {
+  input.body.push('(')
+  input.node.inner.forEach(node => processNode({ ...input, node }))
+  input.body.push(')')
 }
 
-function traverseParenExpr(node, options) {
-  const text = ['(']
-  node.inner.forEach(node => text.push(...processNode(node, options)))
-  text.push(') as ' + node.castKind)
-  return text
+function traverseParenExpr(input) {
+  input.body.push('(')
+  input.node.inner.forEach(node => processNode({ ...input, node }))
+  input.body.push(') as ' + input.node.castKind)
 }
 
-function traverseCharacterLiteral(node, options) {
-  const text = [`'${node.value}'`]
-  return text
+function traverseCharacterLiteral(input) {
+  input.body.push(`'${input.node.value}'`)
 }
 
-function traverseReturnStmt(node, options) {
-  const text = ['return']
-  if (node.inner) {
-    text[0] += ' ('
+function traverseReturnStmt(input) {
+  const header = ['return']
+  if (input.node.inner) {
+    header.push(' (')
   }
-  node.inner?.forEach(node => text.push(...processNode(node, options)))
-  if (node.inner) {
-    text.push(')')
+  input.body.push(header.join(''))
+  input.node.inner?.forEach(node => processNode({ ...input, node }))
+  if (input.node.inner) {
+    input.body.push(')')
   }
-  return text
 }
 
-function traverseCallExpr(node, options) {
-  const text = []
-  node.inner.forEach(node => text.push(...processNode(node, options)))
-  return text
+function traverseCallExpr(input) {
+  input.node.inner.forEach(node => processNode({ ...input, node }))
 }
 
-function traverseExprWithCleanups(node, options) {
-  const text = []
-  node.inner.forEach(node => text.push(...processNode(node, options)))
-  return text
+function traverseExprWithCleanups(input) {
+  input.node.inner.forEach(node => processNode({ ...input, node }))
 }
 
-function traverseTodo(node, options) {
+function traverseTodo(input) {
   const text = []
   return text
 }
 
-function traverseUnion(node, options) {
-  const text = []
-  return text
-}
+function traverseUnion(input) {}
 
-function traverseClassTemplate(node, options) {
-  const text = []
-  return text
-}
+function traverseClassTemplate(input) {}
 
 function getName(name, path = []) {
   const parts = path.concat()
