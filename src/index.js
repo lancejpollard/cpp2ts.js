@@ -1,9 +1,6 @@
 const prettier = require('prettier')
 const buildAST = require('./ast')
 
-const parser = new Parser()
-parser.setLanguage(cpp)
-
 function pretty(string) {
   return prettier.format(convert(string), {
     semi: false,
