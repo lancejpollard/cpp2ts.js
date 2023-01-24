@@ -445,9 +445,8 @@ function processFunctionDefinition(input) {
   const { returnType, name } = input.node
   const params = []
   input.node.parameters.forEach(node => {
-    params.push(
-      `${_.camelCase(node.name)}: ${getTypeName(node.typeName)}`,
-    )
+    let type = getTypeName(node.typeName)
+    params.push(`${_.camelCase(node.name)}${type ? `: ${type}` : ``}`)
   })
 
   const body = []
@@ -455,10 +454,12 @@ function processFunctionDefinition(input) {
     process({ ...input, node, body, scope: 'function' })
   })
 
+  const type = getTypeName(returnType)
+
   input.body.push(
-    `function ${_.camelCase(name)}(${params.join(', ')}): ${getTypeName(
-      returnType,
-    )} {`,
+    `function ${_.camelCase(name)}(${params.join(', ')})${
+      type ? `: ${type}` : ``
+    } {`,
   )
 
   body.forEach(line => {
@@ -472,12 +473,13 @@ function processDeclaration(input) {
   input.node.declarators.forEach(declarator => {
     const name = _.camelCase(getName(declarator.name, input))
     const type = getTypeName(declarator.typeName)
+    const typeText = type ? `: ${type}` : ``
     const init = []
     if (declarator.init) {
       process({ ...input, node: declarator.init, body: init })
-      input.body.push(`let ${name}: ${type} = ${init.join('\n')}`)
+      input.body.push(`let ${name}${typeText} = ${init.join('\n')}`)
     } else {
-      input.body.push(`let ${name}: ${type}`)
+      input.body.push(`let ${name}${typeText}`)
     }
   })
 }
@@ -520,7 +522,7 @@ function logJSON(obj) {
 }
 
 function pascalCase(str) {
-  return _.startCase(_.camelCase(str))
+  return _.startCase(_.camelCase(str)).replace(/ /g, '')
 }
 
 function getTypeName(name) {
