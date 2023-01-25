@@ -1,26 +1,24 @@
-const _ = require('lodash')
 const fs = require('fs')
 const convert = require('./src')
 const print = require('./src/print')
 
-if (!fs.existsSync('tmp')) {
-  fs.mkdirSync('tmp')
-}
-// fs.writeFileSync(
-//   'fixtures/hyper.ast.json',
-//   JSON.stringify(
-//     print(fs.readFileSync('fixtures/hyper.h', 'utf-8')),
-//     null,
-//     2,
-//   ),
-// )
+test('hyperpoint.cpp')
+// test('hyper.h')
 
-// fs.writeFileSync('hyperpoint.2.json', JSON.stringify(traverse(ast), null, 2))
-fs.writeFileSync(
-  'tmp/hyperpoint.ts',
-  convert(fs.readFileSync('fixtures/hyperpoint.cpp', 'utf-8')),
-)
-fs.writeFileSync(
-  'tmp/hyper.ts',
-  convert(fs.readFileSync('fixtures/hyper.h', 'utf-8')),
-)
+function test(name) {
+  const parts = name.split('.')
+  parts.pop()
+  const baseName = parts.join('.')
+  const content = fs.readFileSync(`fixtures/${name}`, 'utf-8')
+
+  if (!fs.existsSync('tmp')) {
+    fs.mkdirSync('tmp')
+  }
+
+  fs.writeFileSync(
+    `tmp/${baseName}.ast.json`,
+    JSON.stringify(print(content), null, 2),
+  )
+
+  fs.writeFileSync(`tmp/${baseName}.ts`, convert(content))
+}

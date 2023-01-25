@@ -9,5 +9,8 @@
   "eslint.nodePath": "./node_modules/eslint",
   "eslint.packageManager": "npm",
   "emmet.excludeLanguages": ["typescript"],
-  "emmet.showExpandedAbbreviation": "never"
+  "emmet.showExpandedAbbreviation": "never",
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  }
 }

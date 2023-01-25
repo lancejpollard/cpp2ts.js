@@ -1,3 +1,4 @@
+const _ = require('lodash')
 const Parser = require('tree-sitter')
 const cpp = require('tree-sitter-cpp')
 
@@ -25,6 +26,9 @@ function process(input) {
       break
     case 'preproc_include':
       break
+    case 'preproc_ifdef':
+      body.push(processPreprocIfdef(input))
+      break
     case 'namespace_definition':
       body.push(processNamespaceDefinition(input))
       break
@@ -44,6 +48,66 @@ function process(input) {
       throwNode(input.node)
   }
   return body
+}
+
+function processPreprocIfdef(input) {
+  const info = { body: [] }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'comment':
+      case '#endif':
+        break
+      case '#ifndef':
+        info.type = 'ifndef'
+        break
+      case 'using_declaration':
+        break
+      case 'identifier':
+        info.condition = {
+          type: 'reference',
+          name: node.text,
+        }
+        break
+      case 'preproc_include':
+        break
+      case 'namespace_definition':
+        info.body.push(processNamespaceDefinition({ ...input, node }))
+        break
+      case 'preproc_def':
+        info.body.push(processPreprocDef({ ...input, node }))
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processPreprocDef(input) {
+  const info = { type: 'define' }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '#define':
+        break
+      case 'preproc_arg':
+        info.value = {
+          type: 'string_literal',
+          value: node.text.trim(),
+        }
+        break
+      case 'identifier':
+        info.name = {
+          type: 'reference',
+          name: node.text,
+        }
+        break
+      case '\n':
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
 }
 
 function processChildren(input) {
@@ -194,6 +258,75 @@ function processNamespaceDefinition(input) {
   return info
 }
 
+function processBaseClassClause(input) {
+  let name
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case ':':
+        break
+      case 'identifier':
+      case 'qualified_identifier':
+        name = node.text.replace(/[\s:]+/g, '_')
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return name
+}
+
+function processTypeDefinition(input) {
+  const info = { type: 'type_definition' }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'typedef':
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processStructSpecifier(input) {
+  const info = { type: 'struct' }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'struct':
+        break
+      case 'type_identifier':
+        info.name = node.text
+        break
+      case 'base_class_clause':
+        info.baseType = processBaseClassClause({ ...input, node })
+        break
+      case 'field_declaration_list':
+        info.fields = processFieldDeclarationList({ ...input, node })
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processFieldDeclarationList(input) {
+  const fields = []
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '{':
+      case '}':
+        break
+      case 'function_definition':
+        fields.push(processFunctionDefinition({ ...input, node }))
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return fields
+}
+
 function processDeclarationList(input) {
   const body = []
   input.node.children.forEach(node => {
@@ -202,7 +335,25 @@ function processDeclarationList(input) {
         break
       case '{':
       case '}':
+      case ';':
       case 'comment':
+        break
+      case 'using_declaration':
+        break
+      case 'preproc_ifdef':
+        body.push(processPreprocIfdef({ ...input, node }))
+        break
+      case 'preproc_def':
+        body.push(processPreprocDef({ ...input, node }))
+        break
+      case 'struct_specifier':
+        body.push(processStructSpecifier({ ...input, node }))
+        break
+      case 'type_definition':
+        body.push(processTypeDefinition({ ...input, node }))
+        break
+      case 'template_declaration':
+        body.push(processTemplateDeclaration({ ...input, node }))
         break
       case 'function_definition':
         body.push(processFunctionDefinition({ ...input, node }))
@@ -217,6 +368,141 @@ function processDeclarationList(input) {
   return body
 }
 
+function processTemplateDeclaration(input) {
+  const info = { template: true }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'template':
+        break
+      case 'template_parameter_list':
+        info.typeParameters = processTemplateParameterList({
+          ...input,
+          node,
+        })
+        break
+      case 'function_definition': {
+        const fn = processFunctionDefinition({ ...input, node })
+        _.merge(info, fn)
+        break
+      }
+      case 'class_specifier': {
+        const cls = processClassSpecifier({ ...input, node })
+        _.merge(info, cls)
+        break
+      }
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processClassSpecifier(input) {
+  const info = { type: 'class' }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'class':
+        break
+      case 'type_identifier':
+        info.name = node.text
+        break
+      case 'field_declaration_list':
+        info.fields = processFieldDeclarationList({ ...input, node })
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processTemplateParameterList(input) {
+  const parameters = []
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '<':
+      case '>':
+      case ',':
+        break
+      case 'type_parameter_declaration':
+        parameters.push(
+          processTypeParameterDeclaration({ ...input, node }),
+        )
+        break
+      case 'variadic_type_parameter_declaration':
+        parameters.push(
+          processVariadicTypeParameterDeclaration({ ...input, node }),
+        )
+        break
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return parameters
+}
+
+function processVariadicTypeParameterDeclaration(input) {
+  const info = { type: 'type_parameter', variadic: true }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '...':
+        break
+      case 'class':
+        info.paramType = node.type
+        break
+      case 'type_identifier':
+        info.name = node.text
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processTypeParameterDeclaration(input) {
+  const info = { type: 'type_parameter' }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'class':
+        info.paramType = node.type
+        break
+      case 'type_identifier':
+        info.name = node.text
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processOperatorCast(input) {
+  const info = {}
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'operator':
+        break
+      case 'primitive_type':
+        info.returnType = node.text
+        break
+      case 'abstract_function_declarator': {
+        const def = processAbstractFunctionDeclarator({
+          ...input,
+          node,
+        })
+        _.merge(info, def)
+        break
+      }
+      default:
+        throwNode(node, input.node)
+    }
+  })
+
+  return info
+}
+
 function processFunctionDefinition(input) {
   const info = {
     type: 'function_definition',
@@ -226,6 +512,22 @@ function processFunctionDefinition(input) {
       case '{':
       case '}':
       case 'comment':
+        break
+      case 'operator_cast':
+        info.cast = processOperatorCast({ ...input, node })
+        break
+      case 'explicit_function_specifier':
+        info.explicit = true
+        break
+      case 'field_initializer_list':
+        // TODO
+        break
+      case 'storage_class_specifier':
+      case 'type_qualifier':
+        // NOTHING?
+        break
+      case 'pointer_declarator':
+        // TODO
         break
       case 'type_identifier':
       case 'primitive_type':
@@ -815,6 +1117,9 @@ function processArgumentList(input) {
           value: node.text,
         })
         break
+      case 'parameter_pack_expansion':
+        args.push(processParameterPackExpansion({ ...input, node }))
+        break
       case 'conditional_expression':
         args.push(processConditionalExpression({ ...input, node }))
         break
@@ -844,6 +1149,25 @@ function processArgumentList(input) {
     }
   })
   return args
+}
+
+function processParameterPackExpansion(input) {
+  const info = { expansion: true }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '...':
+      case 'comment':
+        break
+      case 'identifier':
+      case 'qualified_identifier':
+        info.type = 'reference'
+        info.name = node.text.replace(/:+/g, '_')
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
 }
 
 function processCallExpression(input) {
@@ -1112,6 +1436,9 @@ function processFunctionDeclarator(input) {
       case '}':
       case 'comment':
         break
+      case 'operator_name':
+        throwNode(node, input.node)
+        break
       case 'qualified_identifier': {
         const [type, name] = node.text.split(/\s+/)
         info.typeName = type
@@ -1121,6 +1448,26 @@ function processFunctionDeclarator(input) {
       case 'identifier':
         info.name = node.text
         break
+      case 'parameter_list':
+        info.parameters = processParameterList({ ...input, node })
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processAbstractFunctionDeclarator(input) {
+  const info = {}
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'comment':
+        break
+      case 'type_qualifier': {
+        info.typeName = node.text
+        break
+      }
       case 'parameter_list':
         info.parameters = processParameterList({ ...input, node })
         break
@@ -1142,6 +1489,11 @@ function processParameterList(input) {
         break
       case 'parameter_declaration':
         parameters.push(processParameterDeclaration({ ...input, node }))
+        break
+      case 'variadic_parameter_declaration':
+        parameters.push(
+          processVariadicParameterDeclaration({ ...input, node }),
+        )
         break
       default:
         throwNode(node, input.node)
@@ -1174,8 +1526,26 @@ function processReferenceDeclarator(input) {
   return info
 }
 
-function processParameterDeclaration(input) {
+function processVariadicDeclarator(input) {
   const info = {}
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'comment':
+        break
+      case '...':
+        break
+      case 'identifier':
+        info.name = node.text
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processVariadicParameterDeclaration(input) {
+  const info = { variadic: true }
   input.node.children.forEach(node => {
     switch (node.type) {
       case 'comment':
@@ -1184,8 +1554,36 @@ function processParameterDeclaration(input) {
       case 'primitive_type':
         info.typeName = node.text
         break
+      case 'variadic_declarator': {
+        const decl = processVariadicDeclarator({ ...input, node })
+        _.merge(info, decl)
+        break
+      }
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processParameterDeclaration(input) {
+  const info = {}
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'comment':
+        break
+      case 'abstract_reference_declarator':
+        info.isRef = true
+        break
+      case 'type_identifier':
+      case 'primitive_type':
+        info.typeName = node.text
+        break
       case 'type_qualifier':
         addTypeQualifier(info, node)
+        break
+      case 'qualified_identifier':
+        info.name = node.text.replace(/[\s:]+/g, '_')
         break
       case 'reference_declarator': {
         const ref = processReferenceDeclarator({ ...input, node })
