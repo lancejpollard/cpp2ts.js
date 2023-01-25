@@ -2,8 +2,8 @@ const fs = require('fs')
 const convert = require('./src')
 const print = require('./src/print')
 
-test('hyperpoint.cpp')
-// test('hyper.h')
+// test('hyperpoint.cpp')
+test('hyper.h')
 
 function test(name) {
   const parts = name.split('.')

@@ -194,6 +194,9 @@ function processDeclaration(input) {
       case 'sized_type_specifier':
         // TODO
         break
+      case 'storage_class_specifier':
+        // TODO
+        break
       case 'ERROR': {
         const dec = processDeclaration({ ...input, node })
         const first = dec.declarators.shift()
@@ -275,12 +278,62 @@ function processBaseClassClause(input) {
   return name
 }
 
+function processTemplateType(input) {
+  const info = {}
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case 'type_identifier':
+        info.typeName = node.text
+        break
+      case 'template_argument_list': {
+        info.typeArgs = processTemplateArgumentList({ ...input, node })
+        break
+      }
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
+}
+
+function processTemplateArgumentList(input) {
+  const args = []
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case '<':
+      case '>':
+      case ',':
+        break
+      case 'type_descriptor':
+        args.push({
+          type: 'reference',
+          name: node.text,
+        })
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return args
+}
+
 function processTypeDefinition(input) {
   const info = { type: 'type_definition' }
   input.node.children.forEach(node => {
     switch (node.type) {
       case 'typedef':
+      case ';':
         break
+      case 'type_identifier':
+        info.name = node.text
+        break
+      case 'sized_type_specifier':
+        break
+      case 'template_type': {
+        const tmpl = processTemplateType({ ...input, node })
+        _.merge(info, tmpl)
+        break
+      }
       default:
         throwNode(node, input.node)
     }
@@ -316,6 +369,13 @@ function processFieldDeclarationList(input) {
     switch (node.type) {
       case '{':
       case '}':
+      case 'comment':
+        break
+      case 'preproc_def':
+        // TODO
+        break
+      case 'field_declaration':
+        fields.push(processFieldDeclaration({ ...input, node }))
         break
       case 'function_definition':
         fields.push(processFunctionDefinition({ ...input, node }))
@@ -325,6 +385,29 @@ function processFieldDeclarationList(input) {
     }
   })
   return fields
+}
+
+function processFieldDeclaration(input) {
+  const info = { type: 'field_declaration' }
+  input.node.children.forEach(node => {
+    switch (node.type) {
+      case ';':
+      case ',':
+        break
+      case 'primitive_type':
+        // TODO
+        break
+      case 'type_identifier':
+        // TODO
+        break
+      case 'field_identifier':
+        // TODO
+        break
+      default:
+        throwNode(node, input.node)
+    }
+  })
+  return info
 }
 
 function processDeclarationList(input) {
@@ -339,6 +422,9 @@ function processDeclarationList(input) {
       case 'comment':
         break
       case 'using_declaration':
+        break
+      case 'enum_specifier':
+        // TODO
         break
       case 'preproc_ifdef':
         body.push(processPreprocIfdef({ ...input, node }))
@@ -388,6 +474,11 @@ function processTemplateDeclaration(input) {
       case 'class_specifier': {
         const cls = processClassSpecifier({ ...input, node })
         _.merge(info, cls)
+        break
+      }
+      case 'struct_specifier': {
+        const struct = processStructSpecifier({ ...input, node })
+        _.merge(info, struct)
         break
       }
       default:
@@ -806,6 +897,19 @@ function processAssignmentExpression(input) {
           value: node.text,
         })
         break
+      case 'string_literal':
+        sides.push({
+          type: 'string_literal',
+          value: node.text,
+        })
+        break
+      case 'false':
+      case 'true':
+        sides.push({
+          type: 'boolean_literal',
+          value: node.type,
+        })
+        break
       default:
         throwNode(node, input.node)
     }
@@ -1183,6 +1287,9 @@ function processCallExpression(input) {
           type: 'reference',
           name: node.text.replace(/:+/g, '_'),
         }
+        break
+      case 'field_expression':
+        // TODO
         break
       case 'argument_list':
         call.args = processArgumentList({ ...input, node })
