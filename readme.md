@@ -15,23 +15,15 @@ So this library is like an aid to your process of porting code from C++
 to TypeScript, not a perfect translator. It just saves you some time and
 avoids some tediousness.
 
-## Testing
+## Development
 
-To be able to run the ast tool on the C++ file in `test/fixtures`, you
-need to download the
-[hyperrogue](https://github.com/zenorogue/hyperrogue) repo and install
-its dependencies.
+This is not yet a fully complete project. You can test it out on a
+snippet of C++, and if you get an error, it might look like this:
 
 ```
-git clone git@github.com:zenorogue/hyperrogue.git
-cd hyperrogue
-brew install sdl sdl_gfx sdl_mixer sdl_ttf
+Error: Unhandled node type 'import_from_statement' in context 'module'
 ```
 
-Then from there, you can run the next commands to generate AST in JSON
-for C and C++
-
-```bash
-# c++
-clang++ -Xclang -ast-dump=json -fsyntax-only file.cpp > file.json
-```
+If so, just go and add an `import_from_statement` handler (in the switch
+statement) in the `module` handler. It's pretty basic, check out the
+source code!
